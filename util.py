@@ -13,7 +13,7 @@ class FieldHandler(object):
         """
         self.train_file_path = None
         self.test_file_path = None
-        self.field_nums = 0
+        self.feature_nums = 0
         self.field_dict = {}
         
         self.category_columns = category_columns
@@ -35,16 +35,17 @@ class FieldHandler(object):
 
         self.build_filed_dict()
         self.build_standard_scaler()
+        self.field_nums = len(self.category_columns + self.continuation_columns)
 
     def build_filed_dict(self):
         for column in self.df.columns:
             if column in self.category_columns:
                 cv = self.df[column].unique()
-                self.field_dict[column] = dict(zip(cv, range(self.field_nums, self.field_nums + len(cv))))
-                self.field_nums += len(cv)
+                self.field_dict[column] = dict(zip(cv, range(self.feature_nums, self.feature_nums + len(cv))))
+                self.feature_nums += len(cv)
             else:
-                self.field_dict[column] = self.field_nums
-                self.field_nums += 1
+                self.field_dict[column] = self.feature_nums
+                self.feature_nums += 1
 
     def read_data(self):
         if self.train_file_path and self.test_file_path:
@@ -61,7 +62,6 @@ class FieldHandler(object):
             self.standard_scaler.fit(self.df[self.continuation_columns].values)
         else:
             self.standard_scaler = None
-
 
 
 def transformation_data(file_path:str, field_hander:FieldHandler, label=None):
@@ -91,7 +91,48 @@ def transformation_data(file_path:str, field_hander:FieldHandler, label=None):
     
     df_v = df_v.values.astype("float32")
     df_i = df_i.values.astype("int32")
-    if label:
-        return df_i, df_v, labels
-    return df_i, df_v
 
+    features = {
+        "df_i": df_i,
+        "df_v": df_v
+    }
+
+    if label:
+        return features, labels
+    return features, None
+
+
+
+import pandas as pd
+from sklearn.preprocessing import LabelEncoder,OneHotEncoder
+import numpy as np
+
+def dataGenerate(path="./Dataset/train.csv"):
+    df = pd.read_csv(path)
+    df = df[['Pclass',"Sex","SibSp","Parch","Fare","Embarked","Survived"]]
+    class_columns = ['Pclass',"Sex","SibSp","Parch","Embarked"]
+    continuous_columns = ['Fare']
+    train_x = df.drop('Survived', axis=1)
+    train_y = df['Survived'].values
+    train_x = train_x.fillna("-1")
+    le = LabelEncoder()
+    oht = OneHotEncoder()
+    files_dict = {}
+    s = 0
+    for index, column in enumerate(class_columns):
+        try:
+            train_x[column] =  le.fit_transform(train_x[column])
+        except:
+            pass
+        ont_x = oht.fit_transform(train_x[column].values.reshape(-1,1)).toarray()
+        for i in range(ont_x.shape[1]):
+            files_dict[s] = index
+            s +=1
+        if index == 0:
+            x_t = ont_x
+        else:
+            x_t = np.hstack((x_t, ont_x))
+    x_t = np.hstack((x_t, train_x[continuous_columns].values.reshape(-1,1)))
+    files_dict[s] = index + 1
+
+    return x_t.astype("float32"), train_y.reshape(-1,1).astype("float32"), files_dict

@@ -1,44 +1,63 @@
 import tensorflow as tf
 import numpy as np
-from sklearn.metrics import accuracy_score
-from util import dataGenerate
+class FFM(object):
+    def __init__(self, hparams, df_i, df_v):
+        # df_i, df_v  None * n
+        self.hparams = hparams
+        tf.set_random_seed(self.hparams.seed)
+        self.line_result = self.line_section(df_i, df_v)
+        self.fm_result = self.fm_section(df_i, df_v)
+        print(self.line_result, self.fm_result)
+        self.logits = self.line_result + self.fm_result
+
+    def line_section(self, df_i, df_v):
+        with tf.variable_scope("line"):
+            weights = tf.get_variable("weights",
+                                      shape=[self.hparams.feature_nums, 1],
+                                      dtype=tf.float32,
+                                      initializer=tf.initializers.glorot_uniform()) # f * 1
+            batch_weights = tf.nn.embedding_lookup(weights, df_i) # none * n * 1
+            batch_weights = tf.squeeze(batch_weights, axis=2) # None * n
+            line_result = tf.multiply(df_v, batch_weights, name="line_w_x") # none * n
+            biase =  tf.get_variable("biase",
+                                    shape=[1, 1],
+                                    dtype=tf.float32,
+                                    initializer=tf.initializers.zeros()) # 1 * 1
+            line_result = tf.add(tf.reduce_sum(line_result, axis=1, keepdims=True), biase) #  None，1
+        return line_result
 
 
-def Model(xtrain, ytrain,field_dict, steps = 1000,learning_rate = 0.01,K = 3, display_information = 100,ffm = True, seed = 0):
-    tf.set_random_seed(seed)
-    n = xtrain.shape[1]
-    f = sorted(field_dict.items(), key=lambda s:s[1], reverse=True)[0][1]
-    X = tf.placeholder(tf.float32, shape=[None, n], name="X") # (None, feature_size)
-    y = tf.placeholder(tf.float32, shape=[None, 1], name="y")
-    V = tf.get_variable("v", shape=[f+1, n, K], dtype=tf.float32, initializer=tf.truncated_normal_initializer(stddev=0.3)) #(fields, feature_size, K)
-    W = tf.get_variable("Weights", shape=[n, 1], dtype=tf.float32,
-                        initializer=tf.truncated_normal_initializer(stddev=0.3))
-    b = tf.get_variable("Biases", shape=[1, 1], dtype=tf.float32, initializer=tf.zeros_initializer())
-    logits = tf.matmul(X, W) + b
-    if ffm:
-        # FFM 部分
-        fm_hat = tf.constant(0, dtype='float32')
-        for i in range(n):
-            for j in range(i+1, n):
-                fm_hat += tf.multiply(tf.reduce_sum(tf.multiply(V[field_dict[j],i], V[field_dict[i],j])), tf.reshape(tf.multiply(X[:,i], X[:,j]), [-1,1]))
+    def fm_section(self, df_i, df_v):
+        with tf.variable_scope("fm"):
+            embedding = tf.get_variable("embedding",
+                                        shape=[self.hparams.field_nums,
+                                               self.hparams.feature_nums,
+                                               self.hparams.embedding_size],
+                                        dtype=tf.float32,
+                                        initializer=tf.initializers.random_normal()) # field * f * embedding_size
+            fm_result = None
+            for i in range(self.hparams.field_nums):
+                for j in range(i+1, self.hparams.field_nums):
+                    vi_fj = tf.nn.embedding_lookup(embedding[j], df_i[:,i]) #  None * embedding_size
+                    vj_fi = tf.nn.embedding_lookup(embedding[i], df_i[:,j]) #  None * embedding_size
+                    wij = tf.multiply(vi_fj, vj_fi)
 
-        logits = logits + fm_hat
-        loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=y, logits=logits))
-    else:
-        loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=y, logits=logits))
+                    x_i = tf.expand_dims(df_v[:,i], 1) # None * 1
+                    x_j = tf.expand_dims(df_v[:,j], 1) # None * 1
+                    
+                    xij = tf.multiply(x_i, x_j)  # None * 1
+                    if fm_result is None:
+                        fm_result = tf.reduce_sum(tf.multiply(wij, xij), axis=1, keepdims=True)
+                    else:
+                        fm_result += tf.reduce_sum(tf.multiply(wij, xij), axis=1, keepdims=True)
 
-    y_hat = tf.nn.sigmoid(logits)
-    optimizer = tf.train.AdamOptimizer(learning_rate).minimize(loss)
+            fm_result = tf.reduce_sum(fm_result, axis=1, keep_dims=True)
+        return fm_result
 
 
-    with tf.Session() as sess:
-        sess.run(tf.global_variables_initializer())
-        for i in range(steps):
-            loss_,_,y_h = sess.run([loss,optimizer, y_hat], feed_dict={X:xtrain, y:ytrain})
-            if i % display_information == 0:
-                print("Train accuracy is %.6f loss is %.6f" % (accuracy_score(ytrain.reshape(-1,), np.where(np.array(y_h).reshape(-1,) >= 0.5,1,0)),
-                                                               loss_))
 
-if __name__ == "__main__":
-    x_train, y_train, field_dict = dataGenerate()
-    Model(x_train, y_train, field_dict,1000, 0.01, ffm=True)
+
+
+
+
+

@@ -4,71 +4,63 @@ from model import FM
 
 def create_model_fn(model):
     def model_fn(features, labels, params, mode):
-        if params.opt_type == "adm":
-            optimizer = tf.train.AdamOptimizer(learning_rate=params.lr)
-        elif params.opt_type == "adagrad":
-            optimizer = tf.train.AdagradDAOptimizer(learning_rate=params.lr)
-        elif params.opt_type == "gd":
-            optimizer = tf.train.GradientDescentOptimizer(learning_rate=params.lr)
-        elif params.opt_type == "momentum":
-            optimizer = tf.train.MomentumOptimizer(learning_rate=params.lr)
-        else:
-            raise ValueError("opt type must in adm, adagrad, gd, momentum")
-
 
         if params.threshold:
             threshold = params.threshold
         else:
             threshold = 0.5
 
-        df_i = features["df_i"]
+        
+        df_i = features['df_i']
         df_v = features['df_v']
-        
-        logits = model(hparams=params, df_i=df_i, df_v=df_v).logits
-        print(">>>>>>>>>", logits)
-        
-        if params.loss_type == "log_loss":
-            logits = tf.nn.sigmoid(logits, name="sigmoid")
-            print(logits)
-        
+
+        logits = model(params, df_i, df_v).logits
+
+
         if mode == tf.estimator.ModeKeys.PREDICT:
-            predict = tf.cast(logits > threshold, dtype=tf.float32)
+            pre = tf.nn.sigmoid(logits, name="sigmoid")
+            predict = tf.cast(pre > threshold, dtype=tf.int32)
             predictions = {
-                "predict_pro": logits,
+                "predict_pro": pre,
                 "predict": predict
             }
             return tf.estimator.EstimatorSpec(mode, predictions=predictions)
 
-        if params.loss_type == "log_loss":
-            loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=labels, logits=logits),name="loss")
-            predict = tf.cast(logits > threshold, dtype=tf.float32)
-            accuracy = tf.metrics.accuracy(labels=labels, predictions=predict, name="accuracy")
-            auc = tf.metrics.auc(labels, predictions=logits, name="auc")
-            metrics = {
-                "loss": loss,
-                "accuracy": accuracy,
-                "auc": auc,
-                "predic_pro":logits,
-                "predic":predict
-            }
-            
-        elif params.loss_type == "mse":
-            loss = tf.losses.mean_squared_error(labels, logits, name="loss")
-            metrics = {
-                "loss": loss,
-                "predic":logits
-            }
-        else:
-            raise ValueError("loss type is mse or log_loss")
+
+        if mode == tf.contrib.learn.ModeKeys.TRAIN:
+            loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=labels, logits=logits), name="loss")
+            train_op = tf.contrib.layers.optimize_loss(
+                loss=loss,
+                global_step=tf.train.get_global_step(),
+                learning_rate=params.lr,
+                clip_gradients=10.0,
+                optimizer=params.opt_type
+            )
+
+            pre = tf.nn.sigmoid(logits, name="sigmoid")
+            auc = tf.metrics.auc(labels=labels, predictions=pre, name="auc")
+            accuracy = tf.metrics.accuracy(labels=labels, predictions=tf.cast(pre > threshold, tf.float32), name="accuracy")
+
+            tf.summary.scalar('train_accuracy', accuracy[1])
+            tf.summary.scalar('train_auc', auc[1])
+            return tf.estimator.EstimatorSpec(mode, loss=loss, train_op=train_op)
+
 
         if mode == tf.estimator.ModeKeys.EVAL:
+            loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=labels, logits=logits), name="loss")
+            pre = tf.nn.sigmoid(logits, name="sigmoid")
+            predict = tf.cast(pre > threshold, dtype=tf.int32)
+            auc = tf.metrics.auc(labels=labels, predictions=pre, name="auc")
+            accuracy = tf.metrics.accuracy(labels=labels, predictions=tf.cast(pre > threshold, tf.float32), name="accuracy")
+
+            metrics = {
+                "predict": predict,
+                "predict_pro": pre,
+                "loss":loss,
+                "auc":auc[1],
+                "accuracy":accuracy[1],
+            }
+
             return tf.estimator.EstimatorSpec(mode, loss=loss, eval_metric_ops=metrics)
 
-        opt = optimizer.minimize(loss, global_step=tf.train.get_global_step())
-        if mode == tf.estimator.ModeKeys.TRAIN:
-            tf.summary.scalar("loss", loss)
-            tf.summary.histogram("predict", logits)
-            return tf.estimator.EstimatorSpec(mode, loss=loss, train_op=opt)
     return model_fn
-
-    
