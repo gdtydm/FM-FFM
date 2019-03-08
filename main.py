@@ -51,8 +51,11 @@ def main(_):
     }
    
     log_hook = tf.train.LoggingTensorHook(show_dict, every_n_iter=100)
-    estimator.train(input_fn=train_input_fn, hooks=[log_hook])
+    # estimator.train(input_fn=train_input_fn, hooks=[log_hook])
 
-
+    train_spec = tf.estimator.TrainSpec(input_fn=train_input_fn, hooks=[log_hook])
+    eval_spec = tf.estimator.EvalSpec(input_fn=train_input_fn, )
+    tf.estimator.train_and_evaluate(estimator, train_spec, eval_spec)
+    
 if __name__ == "__main__":
     tf.app.run()

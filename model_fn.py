@@ -54,11 +54,8 @@ def create_model_fn(model):
             accuracy = tf.metrics.accuracy(labels=labels, predictions=tf.cast(pre > threshold, tf.float32), name="accuracy")
 
             metrics = {
-                "predict": predict,
-                "predict_pro": pre,
-                "loss":loss,
-                "auc":auc[1],
-                "accuracy":accuracy[1],
+                "auc":auc,
+                "accuracy":accuracy
             }
 
             return tf.estimator.EstimatorSpec(mode, loss=loss, eval_metric_ops=metrics)
